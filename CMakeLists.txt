@@ -34,11 +34,43 @@ if(${CMAKE_BUILD_TYPE} MATCHES "Release")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -ffast-math -O3") # -Wall -Wextra")
 endif()
 
-find_package(CBLAS NO_MODULE REQUIRED)
-message(STATUS "CBLAS_INCLUDE_DIRS: ${CBLAS_INCLUDE_DIRS}")
+# On mac with homebrew, add default openblas install directory
+if(EXISTS /usr/local/opt/openblas)
+  list(APPEND $ENV{CMAKE_PREFIX_PATH} /usr/local/opt/openblas)
+  message(STATUS "XXX ENV{CMAKE_PREFIX_PATH}: $ENV{CMAKE_PREFIX_PATH}")
+endif()
+##- Select BLAS and LAPACK vendor, one of: Intel(mkl), OpenBLAS, ACML,Apple, NAS, Generic
+##  If you want a specific vendor used for BLAS/LAPACK, run
+##  manually set -DBLA_VENDOR:STRING=[Intel|OpenBLAS|ACML|Apple|NAS|Generic] set(BLA_VENDOR OpenBLAS)
+if(NOT BLA_VENDOR)
+  set(BLA_VENDOR "OpenBLAS") ## TODO: Currently hard-code to use OpenBLAS as a requirement
+endif()
+find_package(BLAS REQUIRED)
+message(STATUS "BLAS_FOUND: ${BLAS_FOUND}")
+message(STATUS "BLAS_LINKER_FLAGS: ${BLAS_LINKER_FLAGS}")
+message(STATUS "BLAS_LIBRARIES: ${BLAS_LIBRARIES}")
+message(STATUS "BLA_STATIC: ${BLA_STATIC}")
+find_package(LAPACK REQUIRED)
+message(STATUS "LAPACK_FOUND: ${LAPACK_FOUND}")
+message(STATUS "LAPACK_LINKER_FLAGS: ${LAPACK_LINKER_FLAGS}")
+message(STATUS "LAPACK_LIBRARIES: ${LAPACK_LIBRARIES}")
+message(STATUS "BLA_STATIC: ${BLA_STATIC}")
+
+if(NOT APPLE)
+  find_package(CBLAS NO_MODULE QUIET)
+  find_package(LAPACKE NO_MODULE QUIET)
+endif()
+if(NOT CBLAS_FOUND OR NOT LAPACKE_FOUND)
+  message(STATUS "Doing custom searching for LAPACKE and CBLAS")
+  ## -- Provide enhanced searching for CBLAS and Lapack for optimized
+  ##    platform specific libraries
+  include(${CMAKE_CURRENT_LIST_DIR}/cmake/SearchForCBLASAndLapack.cmake)
+endif()
+message(STATUS "CBLAS_INCLUDE_DIRS: ${BLAS_INCLUDE_DIRS}")
 include_directories(${CBLAS_INCLUDE_DIRS})
-find_package(LAPACKE NO_MODULE REQUIRED)
 include_directories(${LAPACKE_INCLUDE_DIRS})
+
+##======================================================================
 set(USE_FFTWF ON) # Only find single precision fftw
 find_package(FFTW REQUIRED)
 message(STATUS "FFTWF_LIBRARIES: ${FFTWF_LIBRARIES}")
@@ -46,7 +78,6 @@ message(STATUS "FFTWF_LIBRARIES: ${FFTWF_LIBRARIES}")
 find_package(PNG REQUIRED)
 add_definitions(${PNG_DEFINITIONS})
 include_directories(${PNG_INCLUDE_DIRS})
-
 
 execute_process(COMMAND ${CMAKE_CURRENT_LIST_DIR}/git-version.sh OUTPUT_VARIABLE BART_VERSION_STRING WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
 string(STRIP ${BART_VERSION_STRING} BART_VERSION_STRING) ## Remove trailing whitespace (return characters)
@@ -91,18 +122,14 @@ list(APPEND ALLPROGS ${TSIM})
 set(TIO toimg)
 list(APPEND ALLPROGS ${TIO})
 
-set(FORTRAN_SUPPORT_LIB gfortran)
-
 file(READ src/main.c MAIN_TEMPLATE_STRING)
 foreach(curr_prog ${ALLPROGS})
   set(main_real ${curr_prog})
   string(REPLACE "main_real" "main_${curr_prog}" CURR_PROG_STRING "${MAIN_TEMPLATE_STRING}")
   file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${curr_prog}.c "${CURR_PROG_STRING}")
   add_executable(${curr_prog} ${CMAKE_CURRENT_BINARY_DIR}/${curr_prog}.c)
-  target_link_libraries(${curr_prog} bartsupport ${PNG_LIBRARIES} ${FFTWF_LIBRARIES} ${LAPACKE_LIBRARIES} ${LAPACK_LIBRARIES} ${CBLAS_LIBRARIES} ${BLAS_LIBRARIES} ${FORTRAN_SUPPORT_LIB} )
+  target_link_libraries(${curr_prog} bartsupport ${PNG_LIBRARIES} ${FFTWF_LIBRARIES} ${LAPACKE_LIBRARIES} ${LAPACK_LIBRARIES} ${CBLAS_LIBRARIES} ${BLAS_LIBRARIES} )
 endforeach()
-
-
 
 include_directories(${CMAKE_CURRENT_LIST_DIR}/utests)
 set(UNIT_TEST_SRC utests/test_batchsvd.c  utests/test_flpmath.c   utests/test_pattern.c   utests/test_splines.c)
